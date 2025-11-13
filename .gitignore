@@ -62,3 +62,7 @@ coverage.xml
 mcp-server.exe
 cli.exe
 server.exe
+
+# Large test files
+examples/*.pdf
+*.pdf
