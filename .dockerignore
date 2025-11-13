@@ -1,0 +1,19 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+
+# Build and cache
+pkg/
+*.log
+*.pid
+
+# Editor files
+.vscode/
+.idea/
+
+# Git
+.git
+
+# Test artifacts
+split.zip
