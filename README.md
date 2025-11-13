@@ -56,7 +56,7 @@ docker run --rm -p 8080:8080 mcp-pdf-server:local
 go test ./...
 ```
 
-- Nota: `internal/pdf/split_test.go` es una prueba de integración y se salta si no existe `test.pdf` en la raíz del repo.
+- Nota: `internal/pdf/split_test.go` es una prueba de integración y se salta si no existe `test.pdf` en la raíz del repo. Puedes usar cualquier PDF pequeño para testing local.
 
 **Integración con Claude Desktop (MCP)**
 
