@@ -1,28 +1,87 @@
 # MCP / Claude Desktop Integration
 
-Este directorio contiene ejemplos y notas para integrar este proyecto con Claude Desktop como un MCP server.
+# Integración con Claude Desktop (MCP)
 
-Opciones de integración:
+Este directorio contiene la configuración para integrar este proyecto con Claude Desktop como un MCP server.
 
-- `stdio` (recomendado para Claude Desktop): el MCP server se ejecuta como proceso local y se comunica por stdin/stdout con Claude Desktop.
-- `http` (alternativa): el MCP server expone una API HTTP y se configura en Claude para llamar a los endpoints. Menos integrado; requiere un puente en Claude.
+## ✅ Estado actual
 
-1) Integración rápida — pegar en `claude_desktop_config.json`:
+El servidor MCP stdio ya está completamente implementado en `cmd/mcp-server` y compilado como `bin/mcp-server.exe`.
 
-- Abre el archivo de configuración de Claude Desktop (ver `MCP_CLAUDE_DESKTOP.md` en el ejemplo para rutas). Copia el contenido de `claude_desktop_config_sample.json` en la sección `mcpServers`.
+**Herramientas disponibles:**
+- `pdf_split`: divide un PDF en páginas individuales
+- `pdf_info`: obtiene información del PDF (páginas, tamaño)
+- `pdf_compress`: comprime un PDF optimizando imágenes y metadatos
 
-2) Uso recomendado (stdio):
+## 🚀 Configuración rápida
 
-- Compila un binario `mcp-server.exe` que implemente el protocolo MCP (stdio). El proyecto de ejemplo `comoejemplo/mcp-go-pdf-to-img-2/mcp` muestra un servidor que expone `pdf_to_images` y `pdf_info` (mira `mcp/server.go`). Puedes usarlo como referencia para implementar `cmd/mcp-server` en este repo.
+1. **Copiar la configuración:**
+   - Abre tu archivo `claude_desktop_config.json` (ubicación típica: `%APPDATA%\Claude\claude_desktop_config.json`)
+   - Copia el contenido de `claude_desktop_config_sample.json` en la sección `mcpServers`
 
-3) Uso alternativo (HTTP):
+2. **Ejemplo de configuración completa:**
+   ```json
+   {
+     "mcpServers": {
+       "mcp-pdf-tools": {
+         "command": "C:\\MCPs\\clone_PROYECTOS\\mcp-go-pdf-tools\\bin\\mcp-server.exe",
+         "env": {}
+       }
+     }
+   }
+   ```
 
-- Si prefieres usar el servidor HTTP ya incluido (`cmd/server`), configura Claude Desktop para lanzar el servidor (o ejecutarlo manualmente) y conecta Claude a `http://localhost:8080` mediante un puente. Nota: Claude Desktop espera stdio, por lo que la integración HTTP puede necesitar adaptadores.
+3. **Reiniciar Claude Desktop** para activar el servidor
 
-4) Próximos pasos que puedo hacer por ti:
+## 📝 Uso en Claude
 
-- Implementar el `cmd/mcp-server` que ejecuta un loop stdio compatible con Claude y usa las funciones internas (`internal/pdf`, etc.).
-- Generar el binario `mcp-server.exe` en `bin/` listo para usar en Windows.
-- Crear un descriptor JSON con las herramientas y esquemas ya listos para que Claude las registre automáticamente.
+Una vez integrado, puedes usar las herramientas directamente en Claude:
 
-Si quieres que implemente el `stdio` MCP server ahora (recomendado), lo hago: crearé `cmd/mcp-server` con un pequeño protocolo JSON compatible con el ejemplo y lo enlazaré a las funciones ya implementadas.
+### pdf_compress
+```
+Quiero comprimir un PDF grande. Aquí está ubicado en C:\path\to\large.pdf
+Guárdalo comprimido en C:\path\to\large-compressed.pdf
+```
+
+### pdf_split
+```
+Divide este PDF en páginas individuales: C:\path\to\document.pdf
+Crea un ZIP con las páginas en C:\path\to\output
+```
+
+### pdf_info
+```
+Dame información sobre este PDF: C:\path\to\file.pdf
+```
+
+## 🔧 Alternativa: Usar HTTP directamente
+
+Si prefieres usar el servidor HTTP (`bin/server.exe`) en lugar del MCP:
+
+```powershell
+# Terminal 1: Iniciar servidor HTTP
+C:\MCPs\clone_PROYECTOS\mcp-go-pdf-tools\bin\server.exe
+
+# Terminal 2: Hacer solicitudes
+curl -F "file=@C:\path\to\document.pdf" http://localhost:8080/api/v1/pdf/compress -o compressed.pdf
+```
+
+## 📚 Desarrollo
+
+- **MCP Server code**: `cmd/mcp-server/main.go`
+- **PDF logic**: `internal/pdf/` (split.go, compress.go)
+- **HTTP Server code**: `cmd/server/main.go`
+
+Para compilar manualmente:
+```bash
+go build -o bin/mcp-server.exe ./cmd/mcp-server
+go build -o bin/server.exe ./cmd/server
+```
+
+## ⚠️ Rutas de archivos
+
+Claude Desktop necesita rutas **absolutas** para acceder a los PDFs. Ejemplos válidos:
+- Windows: `C:\Users\tu_usuario\Documents\document.pdf`
+- UNC: `\\servidor\compartido\document.pdf`
+
+No funcionan rutas relativas (como `./documento.pdf`).

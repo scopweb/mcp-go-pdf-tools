@@ -1,13 +1,8 @@
 {
   "mcpServers": {
-    "mcp-pdf-tools-stdio": {
+    "mcp-pdf-tools": {
       "command": "C:\\MCPs\\clone_PROYECTOS\\mcp-go-pdf-tools\\bin\\mcp-server.exe",
-      "args": ["--stdio"],
       "env": {}
-    },
-    "mcp-pdf-tools-http": {
-      "command": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-      "args": ["-NoProfile", "-Command", "Start-Process -FilePath 'c:\\MCPs\\clone_PROYECTOS\\mcp-go-pdf-tools\\cmd\\server\\main.go' -ArgumentList '' -NoNewWindow"]
     }
   }
 }
