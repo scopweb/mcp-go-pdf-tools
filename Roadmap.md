@@ -54,7 +54,100 @@ Este documento resume el estado actual, lo que queda por hacer y mejoras recomen
 1. Probar con Claude Desktop (guía en SETUP_CLAUDE_DESKTOP.md)
 2. Agregar tests unitarios para `pdf_compress` y `pdf_info`
 3. Optimizar el binario MCP (actualmente 20MB)
-4. Considerar agregar más herramientas (merge, rotate, watermark, etc.)
+
+---
+
+## 🚀 Fase 3: Nuevas herramientas PDF (por implementar)
+
+### ⭐ **Prioridad Alta** - Implementar primero
+
+- [ ] **`pdf_merge`** — Combinar múltiples PDFs en uno
+  - Caso de uso: unir reportes, combinar documentos
+  - Complejidad: baja (pdfcpu lo soporta nativamente)
+  - Impacto: muy alto
+  - Parámetros: `pdf_paths[]` (array de rutas), `output_path`
+
+- [ ] **`pdf_extract`** — Extraer rango de páginas a nuevo PDF
+  - Caso de uso: extraer páginas específicas sin crear tantos archivos como split
+  - Complejidad: baja
+  - Impacto: alto (complementa split)
+  - Parámetros: `pdf_path`, `start_page`, `end_page`, `output_path`
+
+- [ ] **`pdf_rotate`** — Rotar páginas (90°, 180°, 270°)
+  - Caso de uso: escaneos al revés, correcciones rápidas
+  - Complejidad: muy baja
+  - Impacto: medio-alto
+  - Parámetros: `pdf_path`, `rotation` (90|180|270), `pages` (opcional, todas si no se especifica), `output_path`
+
+- [ ] **`pdf_remove_pages`** — Eliminar páginas específicas
+  - Caso de uso: limpiar PDFs antes de compartir, eliminar portadas
+  - Complejidad: baja
+  - Impacto: alto
+  - Parámetros: `pdf_path`, `pages[]` (array de números de página), `output_path`
+
+### 📊 **Prioridad Media** - Implementar después
+
+- [ ] **`pdf_watermark`** — Agregar marca de agua (texto/imagen)
+  - Caso de uso: proteger documentos, marcar como "CONFIDENCIAL", "DRAFT"
+  - Complejidad: media (requiere manejo de imágenes/fuentes)
+  - Impacto: medio
+  - Parámetros: `pdf_path`, `watermark_text`, `opacity`, `output_path`
+
+- [ ] **`pdf_encrypt`** — Cifrar PDF con contraseña
+  - Caso de uso: proteger documentos sensibles
+  - Complejidad: media
+  - Impacto: medio-alto (seguridad)
+  - Parámetros: `pdf_path`, `password`, `output_path`, `owner_password` (opcional)
+
+- [ ] **`pdf_decrypt`** — Desencriptar PDF
+  - Caso de uso: remover protección de PDFs
+  - Complejidad: media
+  - Impacto: medio
+  - Parámetros: `pdf_path`, `password`, `output_path`
+
+- [ ] **`pdf_bookmark`** — Agregar índice/marcadores
+  - Caso de uso: mejorar navegación en PDFs grandes
+  - Complejidad: media
+  - Impacto: bajo-medio
+  - Parámetros: `pdf_path`, `bookmarks[]` (array de {title, page}), `output_path`
+
+### 🔧 **Prioridad Baja** - Nice to have
+
+- [ ] **`pdf_flatten`** — Aplanar formularios (eliminar interactividad)
+  - Complejidad: media
+  - Impacto: bajo
+  - Parámetros: `pdf_path`, `output_path`
+
+- [ ] **`pdf_reorder`** — Reordenar páginas
+  - Caso de uso: reorganizar documentos
+  - Complejidad: baja
+  - Impacto: bajo
+  - Parámetros: `pdf_path`, `order[]` (array de números de página en nuevo orden), `output_path`
+
+- [ ] **`pdf_add_text`** — Agregar texto a páginas
+  - Caso de uso: anotar documentos, agregar información
+  - Complejidad: media
+  - Impacto: bajo-medio
+  - Parámetros: `pdf_path`, `text`, `x`, `y`, `font_size`, `output_path`
+
+---
+
+## 📈 Estrategia de implementación
+
+**Recomendación: Implementar en este orden**
+
+1. ✅ `pdf_merge` (1-2 horas) — Mayor ROI, muchos casos de uso
+2. ✅ `pdf_extract` (1 hora) — Complementa split, muy útil
+3. ✅ `pdf_rotate` (30 min) — Rápido, muy solicitado
+4. ✅ `pdf_remove_pages` (1 hora) — Uso común
+5. ✅ `pdf_watermark` (2 horas) — Media complejidad
+6. ✅ `pdf_encrypt/decrypt` (2 horas) — Seguridad
+7. Resto según demanda
+
+**Tiempo estimado:**
+- Top 4 herramientas: ~4-5 horas
+- Top 6 herramientas: ~9-10 horas
+- Todas (10 herramientas): ~15-20 horas
 
 ---
 
