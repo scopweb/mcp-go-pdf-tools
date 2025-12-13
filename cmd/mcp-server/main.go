@@ -92,6 +92,18 @@ func handleRequest(req MCPRequest) *MCPResponse {
 					"required": []string{"pdf_path"},
 				},
 			},
+			{
+				Name:        "pdf_compress",
+				Description: "Compress a PDF file by optimizing images, removing metadata, and cleaning structure. Reduces file size by 30-70% depending on content.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"pdf_path":    map[string]interface{}{"type": "string", "description": "Absolute path to input PDF"},
+						"output_path": map[string]interface{}{"type": "string", "description": "Absolute path where compressed PDF will be saved"},
+					},
+					"required": []string{"pdf_path", "output_path"},
+				},
+			},
 		}
 		return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Result: ToolsListResult{Tools: tools}}
 
@@ -241,6 +253,31 @@ func handleRequest(req MCPRequest) *MCPResponse {
 				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": err.Error()}}
 			}
 			return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Result: info}
+
+		case "pdf_compress":
+			pdfPathI, ok := params.Arguments["pdf_path"]
+			if !ok {
+				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "missing pdf_path"}}
+			}
+			pdfPath, ok := pdfPathI.(string)
+			if !ok || strings.TrimSpace(pdfPath) == "" {
+				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "invalid pdf_path"}}
+			}
+
+			outputPathI, ok := params.Arguments["output_path"]
+			if !ok {
+				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "missing output_path"}}
+			}
+			outputPath, ok := outputPathI.(string)
+			if !ok || strings.TrimSpace(outputPath) == "" {
+				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "invalid output_path"}}
+			}
+
+			result, err := pdf.CompressPDFWithDefaults(pdfPath, outputPath)
+			if err != nil {
+				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": err.Error()}}
+			}
+			return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Result: result}
 
 		case "pdf_to_images":
 			// Not implemented: inform the caller how to proceed.

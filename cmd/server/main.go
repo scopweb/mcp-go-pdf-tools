@@ -18,6 +18,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/api/v1/pdf/split", splitHandler)
+	mux.HandleFunc("/api/v1/pdf/compress", compressHandler)
 
 	srv := &http.Server{
 		Addr:         ":8080",
@@ -124,5 +125,83 @@ func splitHandler(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(2 * time.Second)
 			_ = os.RemoveAll(dir)
 		}(partsDir)
+	}
+}
+
+// compressHandler accepts multipart/form-data with a file field `file`.
+// It compresses the PDF and returns the compressed file as download.
+func compressHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Parse multipart form (max 200MB)
+	if err := r.ParseMultipartForm(200 << 20); err != nil {
+		http.Error(w, "invalid multipart form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "missing file field: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	// Create temp input file
+	tmpInputFile, err := os.CreateTemp("", "upload-*.pdf")
+	if err != nil {
+		http.Error(w, "failed to create temp file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	tmpInputPath := tmpInputFile.Name()
+	defer os.Remove(tmpInputPath)
+
+	// Save uploaded file to disk
+	if _, err := io.Copy(tmpInputFile, file); err != nil {
+		tmpInputFile.Close()
+		http.Error(w, "failed to save uploaded file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	tmpInputFile.Close()
+
+	// Create temp output file
+	tmpOutputFile, err := os.CreateTemp("", "compressed-*.pdf")
+	if err != nil {
+		http.Error(w, "failed to create output temp file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	tmpOutputPath := tmpOutputFile.Name()
+	tmpOutputFile.Close()
+	defer os.Remove(tmpOutputPath)
+
+	// Compress the PDF
+	result, err := pdf.CompressPDFWithDefaults(tmpInputPath, tmpOutputPath)
+	if err != nil {
+		http.Error(w, "failed to compress PDF: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Read the compressed file
+	compressedFile, err := os.Open(tmpOutputPath)
+	if err != nil {
+		http.Error(w, "failed to open compressed file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer compressedFile.Close()
+
+	// Send compressed PDF as download
+	w.Header().Set("Content-Type", "application/pdf")
+	compressedName := fmt.Sprintf("%s-compressed.pdf", header.Filename[:len(header.Filename)-4])
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+compressedName+"\"")
+
+	// Send compression info as headers
+	w.Header().Set("X-Original-Size", fmt.Sprintf("%d", result["original_size"]))
+	w.Header().Set("X-Compressed-Size", fmt.Sprintf("%d", result["compressed_size"]))
+	w.Header().Set("X-Reduction-Percent", fmt.Sprintf("%.1f%%", result["reduction_percent"]))
+
+	if _, err := io.Copy(w, compressedFile); err != nil {
+		log.Printf("error writing compressed PDF response: %v", err)
 	}
 }
