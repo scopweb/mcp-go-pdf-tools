@@ -1,20 +1,25 @@
 package pdf
 
 import (
-	"io/ioutil"
+	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/pdfcpu/pdfcpu/pkg/api"
+	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
 )
 
 // SplitPDFFile splits the PDF at inputPath into separate PDF files,
 // writing them to a temporary directory. It returns the full paths
 // to the generated files. Caller is responsible for removing them.
 func SplitPDFFile(inputPath string) ([]string, error) {
-	tmpDir, err := ioutil.TempDir("", "pdf-split-")
+	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("input file does not exist: %s", inputPath)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "pdf-split-")
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create temp dir: %w", err)
 	}
 
 	// Use pdfcpu api to split the file. It will create files in tmpDir.
@@ -23,14 +28,14 @@ func SplitPDFFile(inputPath string) ([]string, error) {
 	if err := api.SplitFile(inputPath, tmpDir, 1, nil); err != nil {
 		// On error, clean up temp dir and return
 		_ = os.RemoveAll(tmpDir)
-		return nil, err
+		return nil, fmt.Errorf("pdfcpu split failed: %w", err)
 	}
 
 	// Collect generated files (pdfcpu names them like input-<n>.pdf)
-	entries, err := ioutil.ReadDir(tmpDir)
+	entries, err := os.ReadDir(tmpDir)
 	if err != nil {
 		_ = os.RemoveAll(tmpDir)
-		return nil, err
+		return nil, fmt.Errorf("failed to read temp dir: %w", err)
 	}
 
 	var outFiles []string
@@ -38,42 +43,43 @@ func SplitPDFFile(inputPath string) ([]string, error) {
 		if e.IsDir() {
 			continue
 		}
-		outFiles = append(outFiles, filepath.Join(tmpDir, e.Name()))
+		// Basic check to ensure we only pick up PDFs (pdfcpu should only generate PDFs but good to be safe)
+		if filepath.Ext(e.Name()) == ".pdf" {
+			outFiles = append(outFiles, filepath.Join(tmpDir, e.Name()))
+		}
 	}
 
 	return outFiles, nil
 }
 
 // GetPDFInfo returns basic information about a PDF file: pages and file size.
-// This uses a lightweight heuristic (counts occurrences of "/Type /Page") as
-// a fallback when a full PDF parser is not needed. It also returns file size in bytes.
+// It uses pdfcpu to parse the context and get the accurate page count.
 func GetPDFInfo(inputPath string) (map[string]interface{}, error) {
-	if _, err := os.Stat(inputPath); err != nil {
-		return nil, err
-	}
-
-	data, err := ioutil.ReadFile(inputPath)
-	if err != nil {
-		return nil, err
-	}
-
-	// Heuristic page count: count occurrences of "/Type /Page"
-	count := 0
-	bs := []byte("/Type /Page")
-	for i := 0; i+len(bs) <= len(data); i++ {
-		if string(data[i:i+len(bs)]) == string(bs) {
-			count++
-		}
-	}
-
 	fi, err := os.Stat(inputPath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	// Read context/validate to get page count accurately
+	// We use RelaxedConf because we just want info, even if the PDF has minor issues
+	conf := model.NewDefaultConfiguration()
+	conf.ValidationMode = model.ValidationRelaxed
+
+	ctx, err := api.ReadContextFile(inputPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read PDF context: %w", err)
+	}
+
+	// Validate to populate context details like page count if needed,
+	// though ReadContextFile usually populates XRefTable/PageCount.
+	// For simple page count, ReadContextFile is often enough, but let's be safe.
+	if err := api.ValidateContext(ctx); err != nil {
+		return nil, fmt.Errorf("failed to validate PDF: %w", err)
 	}
 
 	info := map[string]interface{}{
 		"file":      filepath.Base(inputPath),
-		"pages":     count,
+		"pages":     ctx.PageCount,
 		"file_size": fi.Size(),
 	}
 

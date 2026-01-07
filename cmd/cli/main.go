@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/scopweb/mcp-go-pdf-to-img/internal/pdf"
+	"github.com/scopweb/mcp-go-pdf-tools/internal/pdf"
 )
 
 func usage() {

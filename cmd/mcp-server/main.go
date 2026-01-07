@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/scopweb/mcp-go-pdf-to-img/internal/pdf"
+	"github.com/scopweb/mcp-go-pdf-tools/internal/pdf"
 )
 
 // Minimal MCP/stdio protocol structures (JSON-RPC style)

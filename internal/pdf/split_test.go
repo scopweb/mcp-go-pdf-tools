@@ -35,3 +35,28 @@ func TestSplitPDFFileIntegration(t *testing.T) {
 		t.Logf("warning: failed to clean up parts dir: %v", err)
 	}
 }
+
+func TestGetPDFInfoValidation(t *testing.T) {
+	// Test non-existent file
+	_, err := GetPDFInfo("non_existent_file.pdf")
+	if err == nil {
+		t.Error("expected error for non-existent file, got nil")
+	}
+
+	// Test invalid file (create a dummy text file)
+	tmpFile, err := os.CreateTemp("", "invalid_pdf_*.txt")
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString("This is not a PDF"); err != nil {
+		t.Fatalf("failed to write to temp file: %v", err)
+	}
+	tmpFile.Close()
+
+	_, err = GetPDFInfo(tmpFile.Name())
+	if err == nil {
+		t.Error("expected error for invalid PDF file, got nil")
+	}
+}
