@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git -C \"c:\\MCPs\\clone\\mcp-go-pdf-to-img-2\" status --short)",
+      "Bash(git -C \"c:\\MCPs\\clone\\mcp-go-pdf-to-img-2\" add SOLUTIONS.md)",
+      "Bash(git -C \"c:\\MCPs\\clone\\mcp-go-pdf-to-img-2\" commit -m \"Remove PDF Compression Solution section\n\nPDF compression functionality has been migrated to mcp-go-pdf-tools, which\nis the appropriate project for PDF manipulation tools. This section is no\nlonger relevant to the pdf2img project which focuses on PDF-to-image\nconversion with PDFium.\n\n🤖 Generated with Claude Code\n\nCo-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>\")",
+      "Bash(git -C \"c:\\MCPs\\clone\\mcp-go-pdf-to-img-2\" log --oneline -3)",
+      "Bash(git -C \"c:\\MCPs\\clone_PROYECTOS\\mcp-go-pdf-tools\" log --oneline -3)",
+      "Bash(git -C \"c:\\MCPs\\clone_PROYECTOS\\mcp-go-pdf-tools\" remote:*)",
+      "Bash(git -C \"c:\\MCPs\\clone\\mcp-go-pdf-to-img-2\" remote -v)",
+      "Bash(git -C \"c:\\MCPs\\clone_PROYECTOS\\mcp-go-pdf-tools\" add Changelog.md)",
+      "Bash(git -C \"c:\\MCPs\\clone_PROYECTOS\\mcp-go-pdf-tools\" commit -m \"Update Changelog: Add PDF compression feature documentation\n\nDocument the new PDF compression functionality added to the project:\n- CompressPDFFile function for file optimization\n- POST /api/v1/pdf/compress HTTP endpoint\n- pdf_compress tool for MCP server integration\n- Compression statistics and performance metrics\n\n🤖 Generated with Claude Code\n\nCo-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>\")",
+      "Bash(git -C \"c:\\MCPs\\clone\\mcp-go-pdf-to-img-2\" add CHANGELOG.md)",
+      "Bash(git -C \"c:\\MCPs\\clone\\mcp-go-pdf-to-img-2\" commit -m \"Update Changelog: Document migration of PDF compression to mcp-go-pdf-tools\n\nRecord the removal of PDF compression functionality from this project:\n- PDF compression has been moved to mcp-go-pdf-tools\n- This project now focuses solely on PDF-to-image conversion with PDFium\n- Clarifies project scope and responsibilities\n\n🤖 Generated with Claude Code\n\nCo-Authored-By: Claude Haiku 4.5 <noreply@anthropic.com>\")",
+      "Bash(git -C \"c:\\MCPs\\clone_PROYECTOS\\mcp-go-pdf-tools\" push origin master)",
+      "Bash(git -C \"c:\\MCPs\\clone\\mcp-go-pdf-to-img-2\" push origin main)",
+      "Bash(git -C \"c:\\MCPs\\clone_PROYECTOS\\mcp-go-pdf-tools\" log --oneline -5)",
+      "Bash(git -C \"c:\\MCPs\\clone\\mcp-go-pdf-to-img-2\" log --oneline -5)",
+      "Bash(git push:*)",
+      "Bash(go list:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(go get:*)",
+      "Bash(go version)",
+      "mcp__plugin_context7_context7__resolve-library-id",
+      "mcp__plugin_context7_context7__query-docs",
+      "Bash(.bincli.exe:*)",
+      "Bash(bincli.exe remove-pages:*)",
+      "Bash(\"c:/MCPs/clone_PROYECTOS/mcp-go-pdf-tools/bin/cli.exe\" remove-pages -i \"c:/MCPs/clone_PROYECTOS/mcp-go-pdf-tools/examples/test2.pdf\" -o \"c:/MCPs/clone_PROYECTOS/mcp-go-pdf-tools/examples/test2_filtered.pdf\" -pages \"7-10,61-66,77,80,119-124,135,136,175-180,191-192,225-230,241,242,255-260,269-272,281-286,295-298\" -mode keep)",
+      "Bash(\"c:/MCPs/clone_PROYECTOS/mcp-go-pdf-tools/bin/mcp-server.exe\")",
+      "Bash(python3:*)"
+    ]
+  }
+}

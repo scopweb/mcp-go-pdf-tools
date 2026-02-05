@@ -19,6 +19,7 @@ func main() {
 	mux.HandleFunc("/health", healthHandler)
 	mux.HandleFunc("/api/v1/pdf/split", splitHandler)
 	mux.HandleFunc("/api/v1/pdf/compress", compressHandler)
+	mux.HandleFunc("/api/v1/pdf/remove-pages", removePagesHandler)
 
 	srv := &http.Server{
 		Addr:         ":8080",
@@ -125,6 +126,86 @@ func splitHandler(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(2 * time.Second)
 			_ = os.RemoveAll(dir)
 		}(partsDir)
+	}
+}
+
+// removePagesHandler accepts multipart/form-data with a file field `file`,
+// a `pages` field with the page selection (e.g. "2,5-8,11"), and an optional
+// `mode` field ("remove" or "keep"). Returns the resulting PDF as download.
+func removePagesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if err := r.ParseMultipartForm(200 << 20); err != nil {
+		http.Error(w, "invalid multipart form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "missing file field: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	pages := r.FormValue("pages")
+	if pages == "" {
+		http.Error(w, "missing pages field", http.StatusBadRequest)
+		return
+	}
+
+	mode := r.FormValue("mode")
+	keepMode := mode == "keep"
+
+	// Save upload to temp file
+	tmpInputFile, err := os.CreateTemp("", "upload-*.pdf")
+	if err != nil {
+		http.Error(w, "failed to create temp file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	tmpInputPath := tmpInputFile.Name()
+	defer os.Remove(tmpInputPath)
+
+	if _, err := io.Copy(tmpInputFile, file); err != nil {
+		tmpInputFile.Close()
+		http.Error(w, "failed to save uploaded file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	tmpInputFile.Close()
+
+	// Create temp output file
+	tmpOutputFile, err := os.CreateTemp("", "removed-pages-*.pdf")
+	if err != nil {
+		http.Error(w, "failed to create output temp file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	tmpOutputPath := tmpOutputFile.Name()
+	tmpOutputFile.Close()
+	defer os.Remove(tmpOutputPath)
+
+	// Remove/keep pages
+	_, err = pdf.RemovePagesFromFile(tmpInputPath, tmpOutputPath, pages, keepMode)
+	if err != nil {
+		http.Error(w, "failed to remove pages: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Send result PDF as download
+	resultFile, err := os.Open(tmpOutputPath)
+	if err != nil {
+		http.Error(w, "failed to open result file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer resultFile.Close()
+
+	w.Header().Set("Content-Type", "application/pdf")
+	resultName := fmt.Sprintf("%s-pages-removed.pdf", header.Filename[:len(header.Filename)-4])
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+resultName+"\"")
+
+	if _, err := io.Copy(w, resultFile); err != nil {
+		log.Printf("error writing result PDF response: %v", err)
 	}
 }
 

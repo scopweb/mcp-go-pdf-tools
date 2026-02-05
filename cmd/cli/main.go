@@ -15,9 +15,12 @@ import (
 func usage() {
 	fmt.Println("Usage:")
 	fmt.Println("  cli split -i <input.pdf> [-outdir <dir>] [-zip <zipfile>]")
+	fmt.Println("  cli remove-pages -i <input.pdf> -o <output.pdf> -pages <selection> [-mode remove|keep]")
 	fmt.Println("Examples:")
 	fmt.Println("  cli split -i test.pdf -outdir output")
 	fmt.Println("  cli split -i test.pdf -zip split.zip")
+	fmt.Println("  cli remove-pages -i test.pdf -o result.pdf -pages '2,5-8,11'")
+	fmt.Println("  cli remove-pages -i test.pdf -o result.pdf -pages '1,3,5' -mode keep")
 }
 
 func zipFiles(zipPath string, files []string) error {
@@ -104,6 +107,32 @@ func main() {
 				fmt.Println(p)
 			}
 		}
+
+	case "remove-pages":
+		fs := flag.NewFlagSet("remove-pages", flag.ExitOnError)
+		in := fs.String("i", "", "input PDF file")
+		out := fs.String("o", "", "output PDF file")
+		pages := fs.String("pages", "", "page selection, e.g. '2,5-8,11'")
+		mode := fs.String("mode", "remove", "mode: 'remove' (default) or 'keep'")
+		fs.Parse(os.Args[2:])
+
+		if *in == "" || *out == "" || *pages == "" {
+			fmt.Println("input, output and pages are required")
+			fs.Usage()
+			os.Exit(2)
+		}
+
+		keepMode := *mode == "keep"
+		result, err := pdf.RemovePagesFromFile(*in, *out, *pages, keepMode)
+		if err != nil {
+			log.Fatalf("remove-pages failed: %v", err)
+		}
+
+		fmt.Printf("Mode: %s\n", result["mode"])
+		fmt.Printf("Original pages: %d\n", result["original_pages"])
+		fmt.Printf("Removed: %d pages\n", result["removed_count"])
+		fmt.Printf("Remaining: %d pages\n", result["remaining_pages"])
+		fmt.Printf("Output: %s\n", result["output_path"])
 
 	default:
 		usage()

@@ -46,10 +46,49 @@ type CallToolParams struct {
 	Arguments map[string]interface{} `json:"arguments"`
 }
 
+// toolResult builds a successful MCP tools/call response with content array.
+func toolResult(id interface{}, data interface{}) *MCPResponse {
+	text, _ := json.Marshal(data)
+	return &MCPResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Result: map[string]interface{}{
+			"content": []map[string]interface{}{
+				{"type": "text", "text": string(text)},
+			},
+		},
+	}
+}
+
+// toolError builds an MCP tools/call error response (isError: true).
+func toolError(id interface{}, msg string) *MCPResponse {
+	return &MCPResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Result: map[string]interface{}{
+			"content": []map[string]interface{}{
+				{"type": "text", "text": msg},
+			},
+			"isError": true,
+		},
+	}
+}
+
+// jsonRPCError builds a JSON-RPC 2.0 error response with the required code field.
+func jsonRPCError(id interface{}, code int, msg string) *MCPResponse {
+	return &MCPResponse{
+		JSONRPC: "2.0",
+		ID:      id,
+		Error: map[string]interface{}{
+			"code":    code,
+			"message": msg,
+		},
+	}
+}
+
 func handleRequest(req MCPRequest) *MCPResponse {
 	switch req.Method {
 	case "initialize":
-		// Return a structured initialize result including capabilities.tools
 		res := map[string]interface{}{
 			"protocolVersion": "2025-06-18",
 			"capabilities": map[string]interface{}{
@@ -59,7 +98,7 @@ func handleRequest(req MCPRequest) *MCPResponse {
 			},
 			"serverInfo": map[string]string{
 				"name":    "mcp-go-pdf-tools",
-				"version": "0.1.0",
+				"version": "0.2.0",
 			},
 		}
 		return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Result: res}
@@ -104,11 +143,24 @@ func handleRequest(req MCPRequest) *MCPResponse {
 					"required": []string{"pdf_path", "output_path"},
 				},
 			},
+			{
+				Name:        "pdf_remove_pages",
+				Description: "Remove or keep specific pages from a PDF. Supports page ranges like '2,5-8,11'. Two modes: 'remove' deletes the listed pages; 'keep' keeps only the listed pages and deletes the rest.",
+				InputSchema: map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"pdf_path":    map[string]interface{}{"type": "string", "description": "Absolute path to input PDF"},
+						"output_path": map[string]interface{}{"type": "string", "description": "Absolute path where the resulting PDF will be saved"},
+						"pages":       map[string]interface{}{"type": "string", "description": "Comma-separated page numbers or ranges to remove/keep. Examples: '2,5-8,11', '1-3', '5'"},
+						"mode":        map[string]interface{}{"type": "string", "enum": []string{"remove", "keep"}, "description": "Operation mode: 'remove' deletes listed pages (default), 'keep' keeps only listed pages and deletes the rest"},
+					},
+					"required": []string{"pdf_path", "output_path", "pages"},
+				},
+			},
 		}
 		return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Result: ToolsListResult{Tools: tools}}
 
 	case "tools/call":
-		// Unmarshal params into CallToolParams
 		var params CallToolParams
 		if paramBytes, err := json.Marshal(req.Params); err == nil {
 			_ = json.Unmarshal(paramBytes, &params)
@@ -116,187 +168,224 @@ func handleRequest(req MCPRequest) *MCPResponse {
 
 		switch params.Name {
 		case "pdf_split":
-			pdfPathI, ok := params.Arguments["pdf_path"]
-			if !ok {
-				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "missing pdf_path"}}
-			}
-			pdfPath, ok := pdfPathI.(string)
-			if !ok || strings.TrimSpace(pdfPath) == "" {
-				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "invalid pdf_path"}}
-			}
-
-			parts, err := pdf.SplitPDFFile(pdfPath)
-			if err != nil {
-				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": err.Error()}}
-			}
-
-			// Optional move to output_dir
-			if outDirI, ok := params.Arguments["output_dir"]; ok {
-				if outDir, ok2 := outDirI.(string); ok2 && strings.TrimSpace(outDir) != "" {
-					if err := os.MkdirAll(outDir, 0755); err == nil {
-						for _, p := range parts {
-							_, name := filepath.Split(p)
-							dst := filepath.Join(outDir, name)
-							_ = os.Rename(p, dst)
-						}
-						// refresh parts list
-						var moved []string
-						for _, p := range parts {
-							_, name := filepath.Split(p)
-							moved = append(moved, filepath.Join(outDir, name))
-						}
-						parts = moved
-					}
-				}
-			}
-
-			// Optionally create a zip archive of the parts
-			// Parameters:
-			//   zip: bool (create zip)
-			//   zip_name: string (optional filename)
-			//   zip_b64: bool (return base64 content)
-			if zipI, ok := params.Arguments["zip"]; ok {
-				if zipFlag, ok2 := zipI.(bool); ok2 && zipFlag {
-					// determine zip name
-					zipName := "split.zip"
-					if zn, ok := params.Arguments["zip_name"].(string); ok && strings.TrimSpace(zn) != "" {
-						zipName = zn
-					} else {
-						// default: <input>-split.zip
-						base := filepath.Base(pdfPath)
-						zipName = base + "-split.zip"
-					}
-
-					tmpDir := filepath.Dir(parts[0])
-					zipPath := filepath.Join(tmpDir, zipName)
-
-					// create zip with proper error handling
-					if len(parts) == 0 {
-						return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "no output files to zip"}}
-					}
-
-					zf, err := os.Create(zipPath)
-					if err != nil {
-						return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": fmt.Sprintf("failed to create zip file: %v", err)}}
-					}
-
-					zw := zip.NewWriter(zf)
-					var zipErr error
-					for _, p := range parts {
-						fr, err := os.Open(p)
-						if err != nil {
-							zipErr = fmt.Errorf("failed to open part %s: %w", p, err)
-							break
-						}
-						_, name := filepath.Split(p)
-						fw, err := zw.Create(name)
-						if err != nil {
-							fr.Close()
-							zipErr = fmt.Errorf("failed to create entry for %s: %w", name, err)
-							break
-						}
-						if _, err := io.Copy(fw, fr); err != nil {
-							fr.Close()
-							zipErr = fmt.Errorf("failed to write entry %s: %w", name, err)
-							break
-						}
-						fr.Close()
-					}
-
-					// close writers and check for errors
-					if cerr := zw.Close(); cerr != nil && zipErr == nil {
-						zipErr = fmt.Errorf("failed to close zip writer: %w", cerr)
-					}
-					if cerr := zf.Close(); cerr != nil && zipErr == nil {
-						zipErr = fmt.Errorf("failed to close zip file: %w", cerr)
-					}
-
-					if zipErr != nil {
-						// cleanup incomplete zip
-						_ = os.Remove(zipPath)
-						return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": zipErr.Error()}}
-					}
-
-					result := map[string]interface{}{"files": parts, "zip": zipPath}
-
-					// optionally return base64 content
-					if b64I, ok := params.Arguments["zip_b64"]; ok {
-						if b64Flag, ok2 := b64I.(bool); ok2 && b64Flag {
-							data, err := os.ReadFile(zipPath)
-							if err != nil {
-								// if reading fails, return error
-								return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": fmt.Sprintf("failed to read zip for b64: %v", err)}}
-							}
-							result["zip_b64"] = base64.StdEncoding.EncodeToString(data)
-						}
-					}
-
-					return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Result: result}
-				}
-			}
-
-			// Default: Return JSON list of file paths
-			return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{"files": parts}}
-
+			return handlePdfSplit(req.ID, params.Arguments)
 		case "pdf_info":
-			pdfPathI, ok := params.Arguments["pdf_path"]
-			if !ok {
-				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "missing pdf_path"}}
-			}
-			pdfPath, ok := pdfPathI.(string)
-			if !ok || strings.TrimSpace(pdfPath) == "" {
-				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "invalid pdf_path"}}
-			}
-
-			info, err := pdf.GetPDFInfo(pdfPath)
-			if err != nil {
-				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": err.Error()}}
-			}
-			return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Result: info}
-
+			return handlePdfInfo(req.ID, params.Arguments)
 		case "pdf_compress":
-			pdfPathI, ok := params.Arguments["pdf_path"]
-			if !ok {
-				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "missing pdf_path"}}
-			}
-			pdfPath, ok := pdfPathI.(string)
-			if !ok || strings.TrimSpace(pdfPath) == "" {
-				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "invalid pdf_path"}}
-			}
-
-			outputPathI, ok := params.Arguments["output_path"]
-			if !ok {
-				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "missing output_path"}}
-			}
-			outputPath, ok := outputPathI.(string)
-			if !ok || strings.TrimSpace(outputPath) == "" {
-				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "invalid output_path"}}
-			}
-
-			result, err := pdf.CompressPDFWithDefaults(pdfPath, outputPath)
-			if err != nil {
-				return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": err.Error()}}
-			}
-			return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Result: result}
-
+			return handlePdfCompress(req.ID, params.Arguments)
+		case "pdf_remove_pages":
+			return handlePdfRemovePages(req.ID, params.Arguments)
 		case "pdf_to_images":
-			// Not implemented: inform the caller how to proceed.
-			return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "pdf_to_images is not implemented in this server. Use the HTTP endpoint or the CLI tool to convert PDFs to images."}}
-
+			return toolError(req.ID, "pdf_to_images is not implemented in this server. Use the HTTP endpoint or the CLI tool to convert PDFs to images.")
 		default:
-			return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "unknown tool: " + params.Name}}
+			return toolError(req.ID, "unknown tool: "+params.Name)
 		}
 
 	case "notifications/initialized":
-		// No response needed
 		return nil
 
 	default:
 		if req.ID != nil {
-			return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Error: map[string]interface{}{"message": "method not found"}}
+			return jsonRPCError(req.ID, -32601, "method not found")
 		}
 		return nil
 	}
+}
+
+func handlePdfSplit(id interface{}, args map[string]interface{}) *MCPResponse {
+	pdfPathI, ok := args["pdf_path"]
+	if !ok {
+		return toolError(id, "missing pdf_path")
+	}
+	pdfPath, ok := pdfPathI.(string)
+	if !ok || strings.TrimSpace(pdfPath) == "" {
+		return toolError(id, "invalid pdf_path")
+	}
+
+	parts, err := pdf.SplitPDFFile(pdfPath)
+	if err != nil {
+		return toolError(id, err.Error())
+	}
+
+	// Optional move to output_dir
+	if outDirI, ok := args["output_dir"]; ok {
+		if outDir, ok2 := outDirI.(string); ok2 && strings.TrimSpace(outDir) != "" {
+			if err := os.MkdirAll(outDir, 0755); err == nil {
+				for _, p := range parts {
+					_, name := filepath.Split(p)
+					dst := filepath.Join(outDir, name)
+					_ = os.Rename(p, dst)
+				}
+				var moved []string
+				for _, p := range parts {
+					_, name := filepath.Split(p)
+					moved = append(moved, filepath.Join(outDir, name))
+				}
+				parts = moved
+			}
+		}
+	}
+
+	// Optionally create a zip archive
+	if zipI, ok := args["zip"]; ok {
+		if zipFlag, ok2 := zipI.(bool); ok2 && zipFlag {
+			zipName := "split.zip"
+			if zn, ok := args["zip_name"].(string); ok && strings.TrimSpace(zn) != "" {
+				zipName = zn
+			} else {
+				base := filepath.Base(pdfPath)
+				zipName = base + "-split.zip"
+			}
+
+			tmpDir := filepath.Dir(parts[0])
+			zipPath := filepath.Join(tmpDir, zipName)
+
+			if len(parts) == 0 {
+				return toolError(id, "no output files to zip")
+			}
+
+			zf, err := os.Create(zipPath)
+			if err != nil {
+				return toolError(id, fmt.Sprintf("failed to create zip file: %v", err))
+			}
+
+			zw := zip.NewWriter(zf)
+			var zipErr error
+			for _, p := range parts {
+				fr, err := os.Open(p)
+				if err != nil {
+					zipErr = fmt.Errorf("failed to open part %s: %w", p, err)
+					break
+				}
+				_, name := filepath.Split(p)
+				fw, err := zw.Create(name)
+				if err != nil {
+					fr.Close()
+					zipErr = fmt.Errorf("failed to create entry for %s: %w", name, err)
+					break
+				}
+				if _, err := io.Copy(fw, fr); err != nil {
+					fr.Close()
+					zipErr = fmt.Errorf("failed to write entry %s: %w", name, err)
+					break
+				}
+				fr.Close()
+			}
+
+			if cerr := zw.Close(); cerr != nil && zipErr == nil {
+				zipErr = fmt.Errorf("failed to close zip writer: %w", cerr)
+			}
+			if cerr := zf.Close(); cerr != nil && zipErr == nil {
+				zipErr = fmt.Errorf("failed to close zip file: %w", cerr)
+			}
+
+			if zipErr != nil {
+				_ = os.Remove(zipPath)
+				return toolError(id, zipErr.Error())
+			}
+
+			result := map[string]interface{}{"files": parts, "zip": zipPath}
+
+			if b64I, ok := args["zip_b64"]; ok {
+				if b64Flag, ok2 := b64I.(bool); ok2 && b64Flag {
+					data, err := os.ReadFile(zipPath)
+					if err != nil {
+						return toolError(id, fmt.Sprintf("failed to read zip for b64: %v", err))
+					}
+					result["zip_b64"] = base64.StdEncoding.EncodeToString(data)
+				}
+			}
+
+			return toolResult(id, result)
+		}
+	}
+
+	return toolResult(id, map[string]interface{}{"files": parts})
+}
+
+func handlePdfInfo(id interface{}, args map[string]interface{}) *MCPResponse {
+	pdfPathI, ok := args["pdf_path"]
+	if !ok {
+		return toolError(id, "missing pdf_path")
+	}
+	pdfPath, ok := pdfPathI.(string)
+	if !ok || strings.TrimSpace(pdfPath) == "" {
+		return toolError(id, "invalid pdf_path")
+	}
+
+	info, err := pdf.GetPDFInfo(pdfPath)
+	if err != nil {
+		return toolError(id, err.Error())
+	}
+	return toolResult(id, info)
+}
+
+func handlePdfCompress(id interface{}, args map[string]interface{}) *MCPResponse {
+	pdfPathI, ok := args["pdf_path"]
+	if !ok {
+		return toolError(id, "missing pdf_path")
+	}
+	pdfPath, ok := pdfPathI.(string)
+	if !ok || strings.TrimSpace(pdfPath) == "" {
+		return toolError(id, "invalid pdf_path")
+	}
+
+	outputPathI, ok := args["output_path"]
+	if !ok {
+		return toolError(id, "missing output_path")
+	}
+	outputPath, ok := outputPathI.(string)
+	if !ok || strings.TrimSpace(outputPath) == "" {
+		return toolError(id, "invalid output_path")
+	}
+
+	result, err := pdf.CompressPDFWithDefaults(pdfPath, outputPath)
+	if err != nil {
+		return toolError(id, err.Error())
+	}
+	return toolResult(id, result)
+}
+
+func handlePdfRemovePages(id interface{}, args map[string]interface{}) *MCPResponse {
+	pdfPathI, ok := args["pdf_path"]
+	if !ok {
+		return toolError(id, "missing pdf_path")
+	}
+	pdfPath, ok := pdfPathI.(string)
+	if !ok || strings.TrimSpace(pdfPath) == "" {
+		return toolError(id, "invalid pdf_path")
+	}
+
+	outputPathI, ok := args["output_path"]
+	if !ok {
+		return toolError(id, "missing output_path")
+	}
+	outputPath, ok := outputPathI.(string)
+	if !ok || strings.TrimSpace(outputPath) == "" {
+		return toolError(id, "invalid output_path")
+	}
+
+	pagesI, ok := args["pages"]
+	if !ok {
+		return toolError(id, "missing pages")
+	}
+	pages, ok := pagesI.(string)
+	if !ok || strings.TrimSpace(pages) == "" {
+		return toolError(id, "invalid pages")
+	}
+
+	keepMode := false
+	if modeI, ok := args["mode"]; ok {
+		if modeStr, ok2 := modeI.(string); ok2 && strings.TrimSpace(modeStr) == "keep" {
+			keepMode = true
+		}
+	}
+
+	result, err := pdf.RemovePagesFromFile(pdfPath, outputPath, pages, keepMode)
+	if err != nil {
+		return toolError(id, err.Error())
+	}
+	return toolResult(id, result)
 }
 
 func main() {
@@ -325,20 +414,14 @@ func main() {
 				logger.Printf("failed to marshal response: %v", err)
 				continue
 			}
-			// Write response to stdout followed by newline
 			fmt.Println(string(b))
 		}
 	}
 
-	// If we reached EOF (client closed its write end) keep the process alive
-	// for a short period so Claude has time to read any final output. This
-	// helps debugging when the client closes unexpectedly.
 	if err := scanner.Err(); err != nil && err != io.EOF {
 		logger.Printf("scanner error: %v", err)
 	} else {
 		logger.Printf("stdin closed (EOF). Keeping process alive for 30s for debugging.")
-		// Wait 30s then exit; this avoids immediate termination so Claude can
-		// read any pending stdout/stderr messages.
 		time.Sleep(30 * time.Second)
 	}
 }
