@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/scopweb/mcp-go-pdf-tools/internal/pdf"
 )
@@ -86,11 +85,34 @@ func jsonRPCError(id interface{}, code int, msg string) *MCPResponse {
 	}
 }
 
+// supportedVersions lists protocol versions this server supports, newest first.
+var supportedVersions = []string{"2025-11-25", "2025-06-18", "2025-03-26"}
+
+func negotiateVersion(clientVersion string) string {
+	// If client requests a version we support, echo it back (MUST per spec).
+	for _, v := range supportedVersions {
+		if v == clientVersion {
+			return v
+		}
+	}
+	// Otherwise, respond with our latest supported version (SHOULD per spec).
+	return supportedVersions[0]
+}
+
 func handleRequest(req MCPRequest) *MCPResponse {
 	switch req.Method {
 	case "initialize":
+		// Extract client's protocolVersion from params for version negotiation.
+		clientVersion := ""
+		if paramsMap, ok := req.Params.(map[string]interface{}); ok {
+			if pv, ok := paramsMap["protocolVersion"].(string); ok {
+				clientVersion = pv
+			}
+		}
+		negotiated := negotiateVersion(clientVersion)
+
 		res := map[string]interface{}{
-			"protocolVersion": "2025-06-18",
+			"protocolVersion": negotiated,
 			"capabilities": map[string]interface{}{
 				"tools": map[string]interface{}{
 					"listChanged": false,
@@ -98,7 +120,7 @@ func handleRequest(req MCPRequest) *MCPResponse {
 			},
 			"serverInfo": map[string]string{
 				"name":    "mcp-go-pdf-tools",
-				"version": "0.2.0",
+				"version": "0.2.1",
 			},
 		}
 		return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Result: res}
@@ -117,7 +139,8 @@ func handleRequest(req MCPRequest) *MCPResponse {
 						"zip_name":   map[string]interface{}{"type": "string", "description": "Optional ZIP filename"},
 						"zip_b64":    map[string]interface{}{"type": "boolean", "description": "Return ZIP content as base64 in response"},
 					},
-					"required": []string{"pdf_path"},
+					"required":             []string{"pdf_path"},
+					"additionalProperties": false,
 				},
 			},
 			{
@@ -128,7 +151,8 @@ func handleRequest(req MCPRequest) *MCPResponse {
 					"properties": map[string]interface{}{
 						"pdf_path": map[string]interface{}{"type": "string", "description": "Path to the PDF file"},
 					},
-					"required": []string{"pdf_path"},
+					"required":             []string{"pdf_path"},
+					"additionalProperties": false,
 				},
 			},
 			{
@@ -140,7 +164,8 @@ func handleRequest(req MCPRequest) *MCPResponse {
 						"pdf_path":    map[string]interface{}{"type": "string", "description": "Absolute path to input PDF"},
 						"output_path": map[string]interface{}{"type": "string", "description": "Absolute path where compressed PDF will be saved"},
 					},
-					"required": []string{"pdf_path", "output_path"},
+					"required":             []string{"pdf_path", "output_path"},
+					"additionalProperties": false,
 				},
 			},
 			{
@@ -154,7 +179,8 @@ func handleRequest(req MCPRequest) *MCPResponse {
 						"pages":       map[string]interface{}{"type": "string", "description": "Comma-separated page numbers or ranges to remove/keep. Examples: '2,5-8,11', '1-3', '5'"},
 						"mode":        map[string]interface{}{"type": "string", "enum": []string{"remove", "keep"}, "description": "Operation mode: 'remove' deletes listed pages (default), 'keep' keeps only listed pages and deletes the rest"},
 					},
-					"required": []string{"pdf_path", "output_path", "pages"},
+					"required":             []string{"pdf_path", "output_path", "pages"},
+					"additionalProperties": false,
 				},
 			},
 		}
@@ -181,7 +207,10 @@ func handleRequest(req MCPRequest) *MCPResponse {
 			return toolError(req.ID, "unknown tool: "+params.Name)
 		}
 
-	case "notifications/initialized":
+	case "ping":
+		return &MCPResponse{JSONRPC: "2.0", ID: req.ID, Result: map[string]interface{}{}}
+
+	case "notifications/initialized", "notifications/cancelled":
 		return nil
 
 	default:
@@ -393,6 +422,8 @@ func main() {
 	logger.Printf("Starting mcp stdio server")
 
 	scanner := bufio.NewScanner(os.Stdin)
+	// Increase buffer to 10MB to handle large JSON-RPC messages (e.g. base64 payloads).
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -406,6 +437,15 @@ func main() {
 		}
 
 		logger.Printf("request: %s", line)
+
+		// Validate: requests (with method expecting response) MUST have non-null id.
+		// Notifications (method starts with "notifications/") are allowed without id.
+		if req.ID == nil && !strings.HasPrefix(req.Method, "notifications/") && req.Method != "" {
+			// Per JSON-RPC 2.0, a request without id is a notification — but MCP
+			// methods like initialize, tools/list, tools/call require an id.
+			logger.Printf("request missing id for method: %s (treating as notification, skipping)", req.Method)
+			continue
+		}
 
 		resp := handleRequest(req)
 		if resp != nil {
@@ -421,7 +461,6 @@ func main() {
 	if err := scanner.Err(); err != nil && err != io.EOF {
 		logger.Printf("scanner error: %v", err)
 	} else {
-		logger.Printf("stdin closed (EOF). Keeping process alive for 30s for debugging.")
-		time.Sleep(30 * time.Second)
+		logger.Printf("stdin closed (EOF). Shutting down.")
 	}
 }

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-02-09
+
+### Fixed
+- **MCP Spec Compliance Audit** — reviewed against MCP specification (2025-11-25)
+  - **Version negotiation** (MUST): server now reads client's `protocolVersion` and echoes it back if supported, or responds with latest supported version. Supports `2025-11-25`, `2025-06-18`, `2025-03-26`
+  - **Ping handler** (MUST): `ping` method now returns empty result instead of `-32601 method not found`
+  - **Request ID validation** (MUST): requests without `id` that are not notifications are now rejected with a log warning
+  - **Scanner buffer** (SHOULD): increased from default 64KB to 10MB to handle large JSON-RPC messages
+  - **Clean shutdown** (SHOULD): removed 30s `time.Sleep` on EOF — server exits immediately as expected by clients
+  - **`additionalProperties: false`** (SHOULD): added to all 4 tool inputSchemas for stricter validation
+  - **`notifications/cancelled`** (SHOULD): now accepted as no-op instead of returning error
+
 ## [0.2.0] - 2026-02-03
 
 ### Added
