@@ -2,116 +2,41 @@ package pdf
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/pdfcpu/pdfcpu/pkg/api"
-	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
+	"github.com/scopweb/mcp-go-pdf-tools/internal/config"
+	"github.com/scopweb/mcp-go-pdf-tools/internal/logging"
+	"github.com/scopweb/mcp-go-pdf-tools/internal/types"
 )
 
-// RemovePagesFromFile removes or keeps specific pages from a PDF.
-//
-// Parameters:
-//   - inputPath: path to the source PDF
-//   - outputPath: path where the result will be written
-//   - pageSelection: comma-separated page ranges, e.g. "2,5-8,11"
-//   - keepMode: if true, keep only the specified pages (remove everything else);
-//     if false, remove the specified pages (keep everything else)
-//
-// Returns a map with operation details (pages removed, pages kept, total original, output path).
+// RemovePagesFromFile is a backward-compatible wrapper for removing/keeping pages.
+// Deprecated: Use Processor.RemovePages() instead.
 func RemovePagesFromFile(inputPath, outputPath, pageSelection string, keepMode bool) (map[string]interface{}, error) {
-	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("input file does not exist: %s", inputPath)
+	defaultConfig := config.PDFConfig{
+		ValidationMode: "relaxed",
 	}
+	processor := NewProcessor(defaultConfig, logging.New("info"))
 
-	pageSelection = strings.TrimSpace(pageSelection)
-	if pageSelection == "" {
-		return nil, fmt.Errorf("page selection cannot be empty")
-	}
-
-	// Read context to get total page count
-	ctx, err := api.ReadContextFile(inputPath)
+	mode := pageRemovalModeFromBool(keepMode)
+	result, err := processor.RemovePages(inputPath, outputPath, pageSelection, mode)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read PDF context: %w", err)
-	}
-	if err := api.ValidateContext(ctx); err != nil {
-		return nil, fmt.Errorf("failed to validate PDF: %w", err)
-	}
-	totalPages := ctx.PageCount
-
-	// Parse the page selection into a set of page numbers
-	selectedPages, err := parsePageSelection(pageSelection, totalPages)
-	if err != nil {
-		return nil, fmt.Errorf("invalid page selection: %w", err)
+		return nil, err
 	}
 
-	if len(selectedPages) == 0 {
-		return nil, fmt.Errorf("page selection resolved to zero pages")
-	}
-
-	// Determine which pages to remove
-	var pagesToRemove []int
-	if keepMode {
-		// Keep mode: remove all pages NOT in the selection
-		keepSet := make(map[int]bool, len(selectedPages))
-		for _, p := range selectedPages {
-			keepSet[p] = true
-		}
-		for i := 1; i <= totalPages; i++ {
-			if !keepSet[i] {
-				pagesToRemove = append(pagesToRemove, i)
-			}
-		}
-	} else {
-		// Remove mode: remove the selected pages directly
-		pagesToRemove = selectedPages
-	}
-
-	if len(pagesToRemove) == 0 {
-		return nil, fmt.Errorf("no pages to remove (selection matches all pages)")
-	}
-
-	if len(pagesToRemove) >= totalPages {
-		return nil, fmt.Errorf("cannot remove all %d pages from the PDF", totalPages)
-	}
-
-	// Build page selection entries for pdfcpu — each range as a separate slice element
-	removeEntries := intsToPageSelectionSlice(pagesToRemove)
-
-	// Ensure output directory exists
-	outDir := filepath.Dir(outputPath)
-	if outDir != "" && outDir != "." {
-		if err := os.MkdirAll(outDir, 0755); err != nil {
-			return nil, fmt.Errorf("failed to create output directory: %w", err)
-		}
-	}
-
-	conf := model.NewDefaultConfiguration()
-	conf.ValidationMode = model.ValidationRelaxed
-
-	if err := api.RemovePagesFile(inputPath, outputPath, removeEntries, conf); err != nil {
-		return nil, fmt.Errorf("failed to remove pages: %w", err)
-	}
-
-	// Calculate kept pages
-	sort.Ints(pagesToRemove)
-	remainingPages := totalPages - len(pagesToRemove)
-
-	result := map[string]interface{}{
-		"original_pages":  totalPages,
-		"removed_pages":   pagesToRemove,
-		"removed_count":   len(pagesToRemove),
-		"remaining_pages": remainingPages,
+	// Convert to map for backward compatibility
+	return map[string]interface{}{
+		"original_pages":  result.OriginalPages,
+		"removed_pages":   result.RemovedPages,
+		"removed_count":   result.RemovedCount,
+		"remaining_pages": result.RemainingPages,
 		"mode":            modeLabel(keepMode),
 		"selection":       pageSelection,
 		"output_file":     filepath.Base(outputPath),
 		"output_path":     outputPath,
-	}
-
-	return result, nil
+	}, nil
 }
 
 // parsePageSelection parses a string like "2,5-8,11" into a sorted, unique
@@ -206,4 +131,12 @@ func modeLabel(keepMode bool) string {
 		return "keep"
 	}
 	return "remove"
+}
+
+// pageRemovalModeFromBool convierte un bool a PageRemovalMode para compatibilidad hacia atrás.
+func pageRemovalModeFromBool(keepMode bool) types.PageRemovalMode {
+	if keepMode {
+		return types.ModeKeep
+	}
+	return types.ModeRemove
 }
