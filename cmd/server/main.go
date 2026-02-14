@@ -1,288 +1,56 @@
 package main
 
 import (
-	"archive/zip"
 	"fmt"
-	"io"
+	"net"
 	"net/http"
-	"os"
-	"path/filepath"
-	"time"
 
-	"log"
-
+	"github.com/scopweb/mcp-go-pdf-tools/internal/config"
+	"github.com/scopweb/mcp-go-pdf-tools/internal/logging"
 	"github.com/scopweb/mcp-go-pdf-tools/internal/pdf"
 )
 
 func main() {
+	// Load configuration from environment
+	cfg := config.NewServerConfig()
+
+	// Initialize logger
+	var logger logging.Logger
+	if cfg.LogFormat == "json" {
+		logger = logging.NewJSON(cfg.LogLevel)
+	} else {
+		logger = logging.New(cfg.LogLevel)
+	}
+
+	// Initialize PDF processor
+	processor := pdf.NewProcessor(cfg.PDF, logger)
+
+	// Initialize handlers
+	handlers := NewHandlers(processor, logger, cfg)
+
+	// Set up HTTP routes
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", healthHandler)
-	mux.HandleFunc("/api/v1/pdf/split", splitHandler)
-	mux.HandleFunc("/api/v1/pdf/compress", compressHandler)
-	mux.HandleFunc("/api/v1/pdf/remove-pages", removePagesHandler)
+	mux.HandleFunc("/health", handlers.Health)
+	mux.HandleFunc("/api/v1/pdf/split", handlers.Split)
+	mux.HandleFunc("/api/v1/pdf/compress", handlers.Compress)
+	mux.HandleFunc("/api/v1/pdf/remove-pages", handlers.RemovePages)
 
+	// Create HTTP server with configuration
+	addr := net.JoinHostPort(cfg.Host, cfg.Port)
 	srv := &http.Server{
-		Addr:         ":8080",
+		Addr:         addr,
 		Handler:      mux,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second,
+		ReadTimeout:  cfg.ReadTimeout,
+		WriteTimeout: cfg.WriteTimeout,
+		IdleTimeout:  cfg.IdleTimeout,
 	}
 
-	log.Printf("Starting server on %s", srv.Addr)
-	if err := srv.ListenAndServe(); err != nil {
-		log.Fatalf("server error: %v", err)
-	}
-}
+	// Start server
+	logger.Info("starting HTTP server",
+		fmt.Sprintf("addr=%s", addr),
+		fmt.Sprintf("log_level=%s", cfg.LogLevel))
 
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte("ok"))
-}
-
-// splitHandler accepts multipart/form-data with a file field `file`.
-// It splits the PDF into separate files and returns a ZIP archive.
-func splitHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Parse multipart form (max 200MB)
-	if err := r.ParseMultipartForm(200 << 20); err != nil {
-		http.Error(w, "invalid multipart form: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "missing file field: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	tmpFile, err := os.CreateTemp("", "upload-*.pdf")
-	if err != nil {
-		http.Error(w, "failed to create temp file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-
-	// Save uploaded file to disk
-	if _, err := io.Copy(tmpFile, file); err != nil {
-		tmpFile.Close()
-		http.Error(w, "failed to save uploaded file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	tmpFile.Close()
-
-	// Split using internal/pdf
-	parts, err := pdf.SplitPDFFile(tmpPath)
-	if err != nil {
-		http.Error(w, "failed to split PDF: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	// Clean up parts dir after response
-	if len(parts) == 0 {
-		http.Error(w, "no pages produced", http.StatusInternalServerError)
-		return
-	}
-
-	// Prepare zip response
-	w.Header().Set("Content-Type", "application/zip")
-	zipName := fmt.Sprintf("%s-split.zip", header.Filename)
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+zipName+"\"")
-
-	zw := zip.NewWriter(w)
-	defer zw.Close()
-
-	for _, p := range parts {
-		f, err := os.Open(p)
-		if err != nil {
-			// log and continue
-			log.Printf("warning: cannot open part %s: %v", p, err)
-			continue
-		}
-
-		_, name := filepath.Split(p)
-		fw, err := zw.Create(name)
-		if err != nil {
-			f.Close()
-			log.Printf("warning: cannot create zip entry: %v", err)
-			continue
-		}
-
-		if _, err := io.Copy(fw, f); err != nil {
-			log.Printf("warning: cannot write zip entry: %v", err)
-		}
-		f.Close()
-	}
-
-	// cleanup temp parts directory
-	if len(parts) > 0 {
-		partsDir := filepath.Dir(parts[0])
-		go func(dir string) {
-			// small delay to let response finish streaming
-			time.Sleep(2 * time.Second)
-			_ = os.RemoveAll(dir)
-		}(partsDir)
-	}
-}
-
-// removePagesHandler accepts multipart/form-data with a file field `file`,
-// a `pages` field with the page selection (e.g. "2,5-8,11"), and an optional
-// `mode` field ("remove" or "keep"). Returns the resulting PDF as download.
-func removePagesHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	if err := r.ParseMultipartForm(200 << 20); err != nil {
-		http.Error(w, "invalid multipart form: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "missing file field: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	pages := r.FormValue("pages")
-	if pages == "" {
-		http.Error(w, "missing pages field", http.StatusBadRequest)
-		return
-	}
-
-	mode := r.FormValue("mode")
-	keepMode := mode == "keep"
-
-	// Save upload to temp file
-	tmpInputFile, err := os.CreateTemp("", "upload-*.pdf")
-	if err != nil {
-		http.Error(w, "failed to create temp file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	tmpInputPath := tmpInputFile.Name()
-	defer os.Remove(tmpInputPath)
-
-	if _, err := io.Copy(tmpInputFile, file); err != nil {
-		tmpInputFile.Close()
-		http.Error(w, "failed to save uploaded file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	tmpInputFile.Close()
-
-	// Create temp output file
-	tmpOutputFile, err := os.CreateTemp("", "removed-pages-*.pdf")
-	if err != nil {
-		http.Error(w, "failed to create output temp file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	tmpOutputPath := tmpOutputFile.Name()
-	tmpOutputFile.Close()
-	defer os.Remove(tmpOutputPath)
-
-	// Remove/keep pages
-	_, err = pdf.RemovePagesFromFile(tmpInputPath, tmpOutputPath, pages, keepMode)
-	if err != nil {
-		http.Error(w, "failed to remove pages: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	// Send result PDF as download
-	resultFile, err := os.Open(tmpOutputPath)
-	if err != nil {
-		http.Error(w, "failed to open result file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer resultFile.Close()
-
-	w.Header().Set("Content-Type", "application/pdf")
-	resultName := fmt.Sprintf("%s-pages-removed.pdf", header.Filename[:len(header.Filename)-4])
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+resultName+"\"")
-
-	if _, err := io.Copy(w, resultFile); err != nil {
-		log.Printf("error writing result PDF response: %v", err)
-	}
-}
-
-// compressHandler accepts multipart/form-data with a file field `file`.
-// It compresses the PDF and returns the compressed file as download.
-func compressHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	// Parse multipart form (max 200MB)
-	if err := r.ParseMultipartForm(200 << 20); err != nil {
-		http.Error(w, "invalid multipart form: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "missing file field: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	// Create temp input file
-	tmpInputFile, err := os.CreateTemp("", "upload-*.pdf")
-	if err != nil {
-		http.Error(w, "failed to create temp file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	tmpInputPath := tmpInputFile.Name()
-	defer os.Remove(tmpInputPath)
-
-	// Save uploaded file to disk
-	if _, err := io.Copy(tmpInputFile, file); err != nil {
-		tmpInputFile.Close()
-		http.Error(w, "failed to save uploaded file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	tmpInputFile.Close()
-
-	// Create temp output file
-	tmpOutputFile, err := os.CreateTemp("", "compressed-*.pdf")
-	if err != nil {
-		http.Error(w, "failed to create output temp file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	tmpOutputPath := tmpOutputFile.Name()
-	tmpOutputFile.Close()
-	defer os.Remove(tmpOutputPath)
-
-	// Compress the PDF
-	result, err := pdf.CompressPDFWithDefaults(tmpInputPath, tmpOutputPath)
-	if err != nil {
-		http.Error(w, "failed to compress PDF: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Read the compressed file
-	compressedFile, err := os.Open(tmpOutputPath)
-	if err != nil {
-		http.Error(w, "failed to open compressed file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer compressedFile.Close()
-
-	// Send compressed PDF as download
-	w.Header().Set("Content-Type", "application/pdf")
-	compressedName := fmt.Sprintf("%s-compressed.pdf", header.Filename[:len(header.Filename)-4])
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+compressedName+"\"")
-
-	// Send compression info as headers
-	w.Header().Set("X-Original-Size", fmt.Sprintf("%d", result["original_size"]))
-	w.Header().Set("X-Compressed-Size", fmt.Sprintf("%d", result["compressed_size"]))
-	w.Header().Set("X-Reduction-Percent", fmt.Sprintf("%.1f%%", result["reduction_percent"]))
-
-	if _, err := io.Copy(w, compressedFile); err != nil {
-		log.Printf("error writing compressed PDF response: %v", err)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		logger.Error("server error", err)
 	}
 }

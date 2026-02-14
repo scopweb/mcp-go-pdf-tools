@@ -1,15 +1,14 @@
 package pdf
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
 
-	"github.com/pdfcpu/pdfcpu/pkg/api"
-	"github.com/pdfcpu/pdfcpu/pkg/pdfcpu/model"
+	"github.com/scopweb/mcp-go-pdf-tools/internal/config"
+	"github.com/scopweb/mcp-go-pdf-tools/internal/logging"
 )
 
 // CompressOptions holds configuration for PDF compression
+// Deprecated: Use config.PDFConfig instead.
 type CompressOptions struct {
 	RemoveMetadata bool
 	ImageQuality   int // 1-100, where lower = higher compression
@@ -17,6 +16,7 @@ type CompressOptions struct {
 }
 
 // DefaultCompressOptions returns recommended compression settings
+// Deprecated: Use config.PDFConfig defaults instead.
 func DefaultCompressOptions() CompressOptions {
 	return CompressOptions{
 		RemoveMetadata: true,
@@ -25,67 +25,37 @@ func DefaultCompressOptions() CompressOptions {
 	}
 }
 
-// CompressPDFFile compresses a PDF file and writes the output to outputPath.
-// It reduces file size by optimizing images, removing metadata, and cleaning structure.
-// Returns the output file path and file size information.
+// CompressPDFFile is a backward-compatible wrapper for compressing PDFs.
+// Deprecated: Use Processor.Compress() instead.
 func CompressPDFFile(inputPath string, outputPath string, opts CompressOptions) (map[string]interface{}, error) {
-	if _, err := os.Stat(inputPath); os.IsNotExist(err) {
-		return nil, fmt.Errorf("input file does not exist: %s", inputPath)
+	cfg := config.PDFConfig{
+		ImageQuality:   opts.ImageQuality,
+		RemoveMetadata: opts.RemoveMetadata,
+		ValidationMode: "relaxed",
 	}
+	processor := NewProcessor(cfg, logging.New("info"))
 
-	// Get original file size
-	originalInfo, err := os.Stat(inputPath)
+	result, err := processor.Compress(inputPath, outputPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to stat input file: %w", err)
-	}
-	originalSize := originalInfo.Size()
-
-	// Create configuration for compression
-	conf := model.NewDefaultConfiguration()
-	conf.ValidationMode = model.ValidationRelaxed
-
-	// Read the PDF context
-	ctx, err := api.ReadContextFile(inputPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read PDF context: %w", err)
+		return nil, err
 	}
 
-	// Validate context
-	if err := api.ValidateContext(ctx); err != nil {
-		return nil, fmt.Errorf("failed to validate PDF: %w", err)
-	}
+	// Convert to map for backward compatibility
+	reductionBytes := result.OriginalSize - result.CompressedSize
+	reductionPercent := result.CompressionRatio * 100
 
-	// Apply compression: remove unused objects
-	if err := api.OptimizeFile(inputPath, outputPath, conf); err != nil {
-		return nil, fmt.Errorf("failed to optimize PDF: %w", err)
-	}
-
-	// Get compressed file size
-	compressedInfo, err := os.Stat(outputPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to stat output file: %w", err)
-	}
-	compressedSize := compressedInfo.Size()
-
-	// Calculate compression ratio
-	reductionPercent := 0.0
-	if originalSize > 0 {
-		reductionPercent = float64(originalSize-compressedSize) / float64(originalSize) * 100
-	}
-
-	result := map[string]interface{}{
-		"original_size":      originalSize,
-		"compressed_size":    compressedSize,
-		"reduction_bytes":    originalSize - compressedSize,
+	return map[string]interface{}{
+		"original_size":      result.OriginalSize,
+		"compressed_size":    result.CompressedSize,
+		"reduction_bytes":    reductionBytes,
 		"reduction_percent":  reductionPercent,
 		"output_file":        filepath.Base(outputPath),
 		"output_path":        outputPath,
-	}
-
-	return result, nil
+	}, nil
 }
 
 // CompressPDFWithDefaults is a convenience function using default compression options
+// Deprecated: Use Processor.Compress() instead.
 func CompressPDFWithDefaults(inputPath string, outputPath string) (map[string]interface{}, error) {
 	return CompressPDFFile(inputPath, outputPath, DefaultCompressOptions())
 }
