@@ -53,6 +53,25 @@ func zipFiles(zipPath string, files []string) error {
 	return nil
 }
 
+func splitCSV(s string) []string {
+	var result []string
+	current := ""
+	for _, c := range s {
+		if c == ',' {
+			if current != "" {
+				result = append(result, current)
+			}
+			current = ""
+		} else {
+			current += string(c)
+		}
+	}
+	if current != "" {
+		result = append(result, current)
+	}
+	return result
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -133,6 +152,33 @@ func main() {
 		fmt.Printf("Removed: %d pages\n", result["removed_count"])
 		fmt.Printf("Remaining: %d pages\n", result["remaining_pages"])
 		fmt.Printf("Output: %s\n", result["output_path"])
+
+	case "merge":
+		fs := flag.NewFlagSet("merge", flag.ExitOnError)
+		out := fs.String("o", "", "output PDF file (required)")
+		inputs := fs.String("i", "", "comma-separated input PDFs or use positional args")
+		fs.Parse(os.Args[2:])
+
+		inputFiles := fs.Args()
+		var inputPaths []string
+
+		if *inputs != "" {
+			for _, f := range splitCSV(*inputs) {
+				inputPaths = append(inputPaths, f)
+			}
+		}
+		inputPaths = append(inputPaths, inputFiles...)
+
+		if *out == "" || len(inputPaths) < 2 {
+			fmt.Println("need -o output file and at least 2 input PDFs")
+			fs.Usage()
+			os.Exit(2)
+		}
+
+		if err := pdf.MergePDFFiles(inputPaths, *out); err != nil {
+			log.Fatalf("merge failed: %v", err)
+		}
+		fmt.Printf("merged %d files -> %s\n", len(inputPaths), *out)
 
 	default:
 		usage()

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -32,8 +33,8 @@ func main() {
 	server := NewMCPServer(processor, logger)
 
 	logger.Info("starting MCP stdio server",
-		fmt.Sprintf("log_level=%s", cfg.LogLevel),
-		fmt.Sprintf("supported_versions=2025-11-25,2025-06-18,2025-03-26"))
+		slog.String("log_level", cfg.LogLevel),
+		slog.String("supported_versions", "2025-11-25,2025-06-18,2025-03-26"))
 
 	// Escáner con buffer grande para payloads grandes
 	scanner := bufio.NewScanner(os.Stdin)
@@ -54,13 +55,13 @@ func main() {
 		}
 
 		logger.Debug("received request",
-			fmt.Sprintf("method=%s", req.Method),
-			fmt.Sprintf("id=%v", req.ID))
+			slog.String("method", req.Method),
+			slog.Any("id", req.ID))
 
 		// Validar ID requerido
 		if req.ID == nil && RequiresID(req.Method) {
 			logger.Warn("request missing required id",
-				fmt.Sprintf("method=%s", req.Method))
+				slog.String("method", req.Method))
 			continue
 		}
 

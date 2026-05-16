@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/scopweb/mcp-go-pdf-tools/internal/logging"
@@ -45,7 +46,7 @@ func (s *MCPServer) HandleRequest(req *Request) *Response {
 	default:
 		if req.ID != nil {
 			s.logger.Warn("unknown method",
-				fmt.Sprintf("method=%s", req.Method))
+				slog.String("method", req.Method))
 			return NewErrorResponse(req.ID, MethodNotFound, fmt.Sprintf("method not found: %s", req.Method))
 		}
 		return nil
@@ -57,7 +58,8 @@ func (s *MCPServer) handleInitialize(req *Request) *Response {
 	var initReq InitializeRequest
 	if len(req.Params) > 0 {
 		if err := json.Unmarshal(req.Params, &initReq); err != nil {
-			s.logger.Warn("failed to unmarshal initialize params", err)
+			s.logger.Warn("failed to unmarshal initialize params",
+			slog.Any("error", err))
 		}
 	}
 
@@ -65,8 +67,8 @@ func (s *MCPServer) handleInitialize(req *Request) *Response {
 	negotiated := s.negotiateVersion(initReq.ProtocolVersion)
 
 	s.logger.Info("initialized",
-		fmt.Sprintf("protocol_version=%s", negotiated),
-		fmt.Sprintf("client_version=%s", initReq.ProtocolVersion))
+		slog.String("protocol_version", negotiated),
+		slog.String("client_version", initReq.ProtocolVersion))
 
 	response := InitializeResponse{
 		ProtocolVersion: negotiated,
@@ -95,12 +97,13 @@ func (s *MCPServer) handleToolsList(req *Request) *Response {
 func (s *MCPServer) handleToolsCall(req *Request) *Response {
 	var callReq CallToolRequest
 	if err := json.Unmarshal(req.Params, &callReq); err != nil {
-		s.logger.Warn("failed to unmarshal tools/call params", err)
+		s.logger.Warn("failed to unmarshal tools/call params",
+			slog.Any("error", err))
 		return NewToolErrorResult(req.ID, fmt.Sprintf("invalid tool call: %v", err))
 	}
 
 	s.logger.Debug("calling tool",
-		fmt.Sprintf("tool=%s", callReq.Name))
+		slog.String("tool", callReq.Name))
 
 	return s.tools.CallTool(req.ID, callReq.Name, callReq.Arguments)
 }

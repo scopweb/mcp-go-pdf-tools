@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 
@@ -34,6 +34,7 @@ func main() {
 	mux.HandleFunc("/api/v1/pdf/split", handlers.Split)
 	mux.HandleFunc("/api/v1/pdf/compress", handlers.Compress)
 	mux.HandleFunc("/api/v1/pdf/remove-pages", handlers.RemovePages)
+	mux.HandleFunc("/api/v1/pdf/merge", handlers.Merge)
 
 	// Create HTTP server with configuration
 	addr := net.JoinHostPort(cfg.Host, cfg.Port)
@@ -47,8 +48,8 @@ func main() {
 
 	// Start server
 	logger.Info("starting HTTP server",
-		fmt.Sprintf("addr=%s", addr),
-		fmt.Sprintf("log_level=%s", cfg.LogLevel))
+		slog.String("addr", addr),
+		slog.String("log_level", cfg.LogLevel))
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		logger.Error("server error", err)

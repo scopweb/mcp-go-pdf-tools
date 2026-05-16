@@ -2,6 +2,7 @@ package util
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"sync"
 	"time"
@@ -48,7 +49,9 @@ func (rc *ResourceCleaner) CleanupSync() error {
 	// Eliminar archivos
 	for _, f := range rc.files {
 		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
-			rc.logger.Warn("failed to remove file", err)
+			rc.logger.Warn("failed to remove file",
+				slog.String("file", f),
+				slog.Any("error", err))
 			lastErr = err
 		}
 	}
@@ -56,7 +59,9 @@ func (rc *ResourceCleaner) CleanupSync() error {
 	// Eliminar directorios
 	for _, d := range rc.dirs {
 		if err := os.RemoveAll(d); err != nil && !os.IsNotExist(err) {
-			rc.logger.Warn("failed to remove directory", err)
+			rc.logger.Warn("failed to remove directory",
+				slog.String("dir", d),
+				slog.Any("error", err))
 			lastErr = err
 		}
 	}

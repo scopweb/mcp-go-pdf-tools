@@ -2,6 +2,7 @@ package pdf
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -49,7 +50,7 @@ func (p *Processor) ValidateFile(path string) error {
 // Split divide un PDF en archivos de una página cada uno.
 func (p *Processor) Split(inputPath string) ([]string, error) {
 	p.logger.Debug("splitting PDF",
-		fmt.Sprintf("path=%s", inputPath))
+		slog.String("path", inputPath))
 
 	if err := p.ValidateFile(inputPath); err != nil {
 		return nil, err
@@ -83,7 +84,7 @@ func (p *Processor) Split(inputPath string) ([]string, error) {
 	}
 
 	p.logger.Debug("PDF split complete",
-		fmt.Sprintf("output_files=%d", len(outFiles)))
+		slog.Int("output_files", len(outFiles)))
 
 	return outFiles, nil
 }
@@ -91,7 +92,7 @@ func (p *Processor) Split(inputPath string) ([]string, error) {
 // GetInfo retorna información sobre un PDF.
 func (p *Processor) GetInfo(inputPath string) (*types.PDFInfoResult, error) {
 	p.logger.Debug("reading PDF info",
-		fmt.Sprintf("path=%s", inputPath))
+		slog.String("path", inputPath))
 
 	if err := p.ValidateFile(inputPath); err != nil {
 		return nil, err
@@ -119,8 +120,8 @@ func (p *Processor) GetInfo(inputPath string) (*types.PDFInfoResult, error) {
 // Compress comprime un PDF optimizando imágenes y limpiando metadata.
 func (p *Processor) Compress(inputPath, outputPath string) (*types.CompressResult, error) {
 	p.logger.Debug("compressing PDF",
-		fmt.Sprintf("input=%s", inputPath),
-		fmt.Sprintf("output=%s", outputPath))
+		slog.String("input", inputPath),
+		slog.String("output", outputPath))
 
 	if err := p.ValidateFile(inputPath); err != nil {
 		return nil, err
@@ -168,8 +169,8 @@ func (p *Processor) Compress(inputPath, outputPath string) (*types.CompressResul
 	}
 
 	p.logger.Debug("PDF compression complete",
-		fmt.Sprintf("original_size=%d", originalSize),
-		fmt.Sprintf("compressed_size=%d", compressedSize))
+		slog.Int64("original_size", originalSize),
+		slog.Int64("compressed_size", compressedSize))
 
 	return result, nil
 }
@@ -177,8 +178,8 @@ func (p *Processor) Compress(inputPath, outputPath string) (*types.CompressResul
 // RemovePages elimina o conserva páginas específicas de un PDF.
 func (p *Processor) RemovePages(inputPath, outputPath, pageSelection string, mode types.PageRemovalMode) (*types.RemovePagesResult, error) {
 	p.logger.Debug("removing pages from PDF",
-		fmt.Sprintf("input=%s", inputPath),
-		fmt.Sprintf("mode=%s", mode))
+		slog.String("input", inputPath),
+		slog.String("mode", string(mode)))
 
 	if !mode.IsValid() {
 		return nil, fmt.Errorf("invalid mode: %s", mode)
@@ -205,7 +206,9 @@ func (p *Processor) RemovePages(inputPath, outputPath, pageSelection string, mod
 	// Parsear selección de páginas
 	selectedPages, err := parsePageSelection(pageSelection, totalPages)
 	if err != nil {
-		p.logger.Warn("invalid page selection", fmt.Errorf("selection=%s: %w", pageSelection, err))
+		p.logger.Warn("invalid page selection",
+			slog.String("selection", pageSelection),
+			slog.Any("error", err))
 		return nil, err
 	}
 
@@ -262,8 +265,58 @@ func (p *Processor) RemovePages(inputPath, outputPath, pageSelection string, mod
 	}
 
 	p.logger.Debug("page removal complete",
-		fmt.Sprintf("removed=%d", len(pagesToRemove)),
-		fmt.Sprintf("remaining=%d", result.RemainingPages))
+		slog.Int("removed", len(pagesToRemove)),
+		slog.Int("remaining", result.RemainingPages))
+
+	return result, nil
+}
+
+// Merge combina múltiples PDFs en un solo archivo de salida.
+func (p *Processor) Merge(inputPaths []string, outputPath string) (*types.MergeResult, error) {
+	p.logger.Debug("merging PDFs",
+		slog.Int("input_count", len(inputPaths)),
+		slog.String("output", outputPath))
+
+	if len(inputPaths) == 0 {
+		return nil, fmt.Errorf("no input files provided")
+	}
+
+	// Validar que todos los archivos existan
+	for _, path := range inputPaths {
+		if err := p.ValidateFile(path); err != nil {
+			return nil, fmt.Errorf("input file validation failed: %w", err)
+		}
+	}
+
+	// Asegurar directorio de salida
+	if err := ensureOutputDir(outputPath); err != nil {
+		p.logger.Error("failed to create output directory", err)
+		return nil, err
+	}
+
+	conf := p.newConfiguration()
+	if err := api.MergeCreateFile(inputPaths, outputPath, false, conf); err != nil {
+		p.logger.Error("PDF merge failed", err)
+		return nil, fmt.Errorf("merge failed: %w", err)
+	}
+
+	// Obtener información del archivo resultante
+	resultInfo, err := os.Stat(outputPath)
+	if err != nil {
+		p.logger.Error("failed to stat output file", err)
+		return nil, fmt.Errorf("failed to stat output file: %w", err)
+	}
+
+	result := &types.MergeResult{
+		OutputPath:  outputPath,
+		InputFiles:  inputPaths,
+		InputCount:  len(inputPaths),
+		OutputSize:  resultInfo.Size(),
+	}
+
+	p.logger.Debug("PDF merge complete",
+		slog.Int("merged_files", len(inputPaths)),
+		slog.Int64("output_size", resultInfo.Size()))
 
 	return result, nil
 }

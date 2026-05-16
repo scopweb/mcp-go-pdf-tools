@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,6 +40,7 @@ func NewToolsRegistry(processor *pdf.Processor, logger logging.Logger) *ToolsReg
 	registry.registerTool(&PDFInfoHandler{processor: processor, logger: logger})
 	registry.registerTool(&PDFCompressHandler{processor: processor, logger: logger})
 	registry.registerTool(&PDFRemovePagesHandler{processor: processor, logger: logger})
+	registry.registerTool(&PDFMergeHandler{processor: processor, logger: logger})
 
 	return registry
 }
@@ -116,8 +118,8 @@ func (h *PDFSplitHandler) Handle(id RequestID, rawArgs json.RawMessage) *Respons
 	}
 
 	h.logger.Debug("executing pdf_split",
-		fmt.Sprintf("pdf_path=%s", args.PDFPath),
-		fmt.Sprintf("zip=%v", args.Zip))
+		slog.String("pdf_path", args.PDFPath),
+		slog.Bool("zip", args.Zip))
 
 	// Split PDF
 	parts, err := h.processor.Split(args.PDFPath)
@@ -134,7 +136,7 @@ func (h *PDFSplitHandler) Handle(id RequestID, rawArgs json.RawMessage) *Respons
 				_, name := filepath.Split(p)
 				dst := filepath.Join(args.OutputDir, name)
 				if err := os.Rename(p, dst); err != nil {
-					h.logger.Warn("failed to move file", err)
+					h.logger.Warn("failed to move file", slog.Any("error", err))
 				} else {
 					movedParts = append(movedParts, dst)
 				}
@@ -249,7 +251,7 @@ func (h *PDFInfoHandler) Handle(id RequestID, rawArgs json.RawMessage) *Response
 	}
 
 	h.logger.Debug("executing pdf_info",
-		fmt.Sprintf("pdf_path=%s", args.PDFPath))
+		slog.String("pdf_path", args.PDFPath))
 
 	info, err := h.processor.GetInfo(args.PDFPath)
 	if err != nil {
@@ -303,8 +305,8 @@ func (h *PDFCompressHandler) Handle(id RequestID, rawArgs json.RawMessage) *Resp
 	}
 
 	h.logger.Debug("executing pdf_compress",
-		fmt.Sprintf("pdf_path=%s", args.PDFPath),
-		fmt.Sprintf("output_path=%s", args.OutputPath))
+		slog.String("pdf_path", args.PDFPath),
+		slog.String("output_path", args.OutputPath))
 
 	result, err := h.processor.Compress(args.PDFPath, args.OutputPath)
 	if err != nil {
@@ -375,13 +377,68 @@ func (h *PDFRemovePagesHandler) Handle(id RequestID, rawArgs json.RawMessage) *R
 	}
 
 	h.logger.Debug("executing pdf_remove_pages",
-		fmt.Sprintf("pdf_path=%s", args.PDFPath),
-		fmt.Sprintf("mode=%s", mode),
-		fmt.Sprintf("pages=%s", args.Pages))
+		slog.String("pdf_path", args.PDFPath),
+		slog.String("mode", string(mode)),
+		slog.String("pages", args.Pages))
 
 	result, err := h.processor.RemovePages(args.PDFPath, args.OutputPath, args.Pages, mode)
 	if err != nil {
 		h.logger.Error("pdf_remove_pages failed", err)
+		return NewToolErrorResult(id, err.Error())
+	}
+
+	resultJSON, _ := json.Marshal(result)
+	return NewToolResult(id, string(resultJSON))
+}
+
+// PDFMergeHandler handles pdf_merge
+type PDFMergeHandler struct {
+	processor *pdf.Processor
+	logger    logging.Logger
+}
+
+type pdfMergeArgs struct {
+	InputPaths  []string `json:"input_paths"`
+	OutputPath  string   `json:"output_path"`
+}
+
+func (h *PDFMergeHandler) GetDefinition() Tool {
+	return Tool{
+		Name:        "pdf_merge",
+		Description: "Merge multiple PDF files into a single output PDF",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"input_paths":  map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "Array of absolute paths to input PDF files"},
+				"output_path":  map[string]interface{}{"type": "string", "description": "Absolute path where the merged PDF will be saved"},
+			},
+			"required":             []string{"input_paths", "output_path"},
+			"additionalProperties": false,
+		},
+	}
+}
+
+func (h *PDFMergeHandler) Handle(id RequestID, rawArgs json.RawMessage) *Response {
+	var args pdfMergeArgs
+	if err := UnmarshalParams(rawArgs, &args); err != nil {
+		h.logger.Error("failed to unmarshal pdf_merge args", err)
+		return NewToolErrorResult(id, fmt.Sprintf("invalid arguments: %v", err))
+	}
+
+	if len(args.InputPaths) < 2 {
+		return NewToolErrorResult(id, "need at least 2 PDF files to merge")
+	}
+	if strings.TrimSpace(args.OutputPath) == "" {
+		return NewToolErrorResult(id, "missing or invalid output_path")
+	}
+
+	h.logger.Debug("executing pdf_merge",
+		slog.Int("input_count", len(args.InputPaths)),
+		slog.String("output", args.OutputPath))
+
+	result, err := h.processor.Merge(args.InputPaths, args.OutputPath)
+	if err != nil {
+		h.logger.Error("pdf_merge failed", err)
 		return NewToolErrorResult(id, err.Error())
 	}
 

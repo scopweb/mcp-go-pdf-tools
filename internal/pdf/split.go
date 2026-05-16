@@ -3,7 +3,6 @@ package pdf
 import (
 	"github.com/scopweb/mcp-go-pdf-tools/internal/config"
 	"github.com/scopweb/mcp-go-pdf-tools/internal/logging"
-	"github.com/scopweb/mcp-go-pdf-tools/internal/types"
 )
 
 // SplitPDFFile is a backward-compatible wrapper for splitting PDFs.

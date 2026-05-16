@@ -2,8 +2,10 @@ package main
 
 import (
 	"archive/zip"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -54,7 +56,7 @@ func (h *Handlers) Split(w http.ResponseWriter, r *http.Request) {
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		h.logger.Warn("missing file field", err)
+		h.logger.Warn("missing file field", slog.Any("error", err))
 		http.Error(w, "missing file field", http.StatusBadRequest)
 		return
 	}
@@ -104,7 +106,7 @@ func (h *Handlers) Split(w http.ResponseWriter, r *http.Request) {
 	for _, p := range parts {
 		f, err := os.Open(p)
 		if err != nil {
-			h.logger.Warn("cannot open part file", err)
+			h.logger.Warn("cannot open part file", slog.Any("error", err))
 			continue
 		}
 
@@ -112,12 +114,12 @@ func (h *Handlers) Split(w http.ResponseWriter, r *http.Request) {
 		fw, err := zw.Create(name)
 		if err != nil {
 			f.Close()
-			h.logger.Warn("cannot create zip entry", err)
+			h.logger.Warn("cannot create zip entry", slog.Any("error", err))
 			continue
 		}
 
 		if _, err := io.Copy(fw, f); err != nil {
-			h.logger.Warn("cannot write zip entry", err)
+			h.logger.Warn("cannot write zip entry", slog.Any("error", err))
 		}
 		f.Close()
 	}
@@ -148,7 +150,7 @@ func (h *Handlers) RemovePages(w http.ResponseWriter, r *http.Request) {
 	// Get file
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		h.logger.Warn("missing file field", err)
+		h.logger.Warn("missing file field", slog.Any("error", err))
 		http.Error(w, "missing file field", http.StatusBadRequest)
 		return
 	}
@@ -251,7 +253,7 @@ func (h *Handlers) Compress(w http.ResponseWriter, r *http.Request) {
 	// Get file
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		h.logger.Warn("missing file field", err)
+		h.logger.Warn("missing file field", slog.Any("error", err))
 		http.Error(w, "missing file field", http.StatusBadRequest)
 		return
 	}
@@ -314,6 +316,75 @@ func (h *Handlers) Compress(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Compression-Ratio", fmt.Sprintf("%.2f%%", result.CompressionRatio*100))
 
 	if _, err := io.Copy(w, compressedFile); err != nil {
+		h.logger.Error("error writing response", err)
+	}
+}
+
+// MergeRequest contiene el request para merge de PDFs.
+type MergeRequest struct {
+	Paths          []string `json:"paths"`
+	OutputFilename string   `json:"output_filename"`
+}
+
+// Merge combina múltiples PDFs y devuelve el resultado como PDF binario.
+func (h *Handlers) Merge(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req MergeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.logger.Error("failed to decode merge request", err)
+		http.Error(w, "invalid json body: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Paths) == 0 {
+		http.Error(w, "paths cannot be empty", http.StatusBadRequest)
+		return
+	}
+
+	// Crear archivo temporal de salida
+	tmpOutputFile, err := os.CreateTemp("", "merged-*.pdf")
+	if err != nil {
+		h.logger.Error("failed to create temp file", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	tmpOutputPath := tmpOutputFile.Name()
+	tmpOutputFile.Close()
+	defer os.Remove(tmpOutputPath)
+
+	// Merge PDFs
+	result, err := h.processor.Merge(req.Paths, tmpOutputPath)
+	if err != nil {
+		h.logger.Error("PDF merge failed", err)
+		http.Error(w, "failed to merge PDFs: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	_ = result // result puede usarse para metadata futura
+
+	// Abrir archivo resultante
+	resultFile, err := os.Open(tmpOutputPath)
+	if err != nil {
+		h.logger.Error("failed to open result file", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	defer resultFile.Close()
+
+	// Enviar resultado
+	outputFilename := req.OutputFilename
+	if outputFilename == "" {
+		outputFilename = "merged.pdf"
+	}
+
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+outputFilename+"\"")
+
+	if _, err := io.Copy(w, resultFile); err != nil {
 		h.logger.Error("error writing response", err)
 	}
 }

@@ -64,6 +64,14 @@ type RemovePagesResult struct {
 	Mode           PageRemovalMode `json:"mode"`
 }
 
+// MergeResult contiene el resultado de una operación de merge.
+type MergeResult struct {
+	OutputPath  string   `json:"output_path"`
+	InputFiles  []string `json:"input_files"`
+	InputCount  int      `json:"input_count"`
+	OutputSize  int64    `json:"output_size"`
+}
+
 // ToolResult es el resultado genérico de una herramienta MCP.
 type ToolResult struct {
 	Content string      `json:"content"`

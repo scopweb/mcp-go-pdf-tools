@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 )
 
 // MCPProtocol contiene tipos y funciones de protocolo MCP/stdio.

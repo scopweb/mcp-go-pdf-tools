@@ -89,9 +89,9 @@ func (l *SlogLogger) Error(msg string, err error, attrs ...slog.Attr) {
 	l.logger.LogAttrs(context.Background(), slog.LevelError, msg, attrs...)
 }
 
-// WithAttrs retorna un logger con atributos adicionales (para contexto).
-func (l *SlogLogger) WithAttrs(attrs ...slog.Attr) *SlogLogger {
-	return &SlogLogger{logger: l.logger.With(attrs...)}
+// WithArgs retorna un logger con atributos adicionales usando valores any.
+func (l *SlogLogger) WithArgs(args ...any) *SlogLogger {
+	return &SlogLogger{logger: l.logger.With(args...)}
 }
 
 // contextKey es el tipo para las claves del contexto.
