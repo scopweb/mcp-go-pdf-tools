@@ -320,10 +320,20 @@ func (h *Handlers) Compress(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// MergeFileEntry representa un archivo individual en el request de merge.
+type MergeFileEntry struct {
+	Path   string `json:"path"`
+	Copies int    `json:"copies,omitempty"`
+}
+
 // MergeRequest contiene el request para merge de PDFs.
 type MergeRequest struct {
-	Paths          []string `json:"paths"`
-	OutputFilename string   `json:"output_filename"`
+	// Paths es el formato antiguo (1 copia por archivo)
+	Paths []string `json:"paths"`
+	// Files es el nuevo formato que soporta copias múltiples
+	Files []MergeFileEntry `json:"files"`
+	// OutputFilename nombre del archivo de salida
+	OutputFilename string `json:"output_filename"`
 }
 
 // Merge combina múltiples PDFs y devuelve el resultado como PDF binario.
@@ -340,8 +350,25 @@ func (h *Handlers) Merge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if len(req.Paths) == 0 {
-		http.Error(w, "paths cannot be empty", http.StatusBadRequest)
+	// Construir lista expandida de archivos
+	var expandedPaths []string
+
+	// Soportar formato nuevo "files" con copias
+	if len(req.Files) > 0 {
+		for _, entry := range req.Files {
+			copies := entry.Copies
+			if copies <= 0 {
+				copies = 1
+			}
+			for i := 0; i < copies; i++ {
+				expandedPaths = append(expandedPaths, entry.Path)
+			}
+		}
+	} else if len(req.Paths) > 0 {
+		// Formato antiguo "paths" (1 copia cada uno)
+		expandedPaths = req.Paths
+	} else {
+		http.Error(w, "paths or files cannot be empty", http.StatusBadRequest)
 		return
 	}
 
@@ -357,14 +384,14 @@ func (h *Handlers) Merge(w http.ResponseWriter, r *http.Request) {
 	defer os.Remove(tmpOutputPath)
 
 	// Merge PDFs
-	result, err := h.processor.Merge(req.Paths, tmpOutputPath)
+	result, err := h.processor.Merge(expandedPaths, tmpOutputPath)
 	if err != nil {
 		h.logger.Error("PDF merge failed", err)
 		http.Error(w, "failed to merge PDFs: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	_ = result // result puede usarse para metadata futura
+	_ = result
 
 	// Abrir archivo resultante
 	resultFile, err := os.Open(tmpOutputPath)
